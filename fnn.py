@@ -4,122 +4,23 @@ import random
 
 import numpy as np
 
-
-class Activation:
-    @staticmethod
-    def sigmoid(z):
-        res = 1.0 / (1.0 + np.exp(-z))
-        return res
-
-    @staticmethod
-    def sigmoid_prime(z):
-        return Activation.sigmoid(z) * (1 - Activation.sigmoid(z))
-
-    @staticmethod
-    def relu(z):
-        return np.where(z > 0, z, 0)
-
-    @staticmethod
-    def relu_prime(z):
-        return np.where(z > 0, 1, 0)
-
-    @staticmethod
-    def leaky_relu(z, decay=0.1):
-        return np.where(z > 0, z, decay * z)
-
-    @staticmethod
-    def leaky_relu_prime(z, decay=0.1):
-        return np.where(z > 0, 1, decay)
-
-    @staticmethod
-    def softmax(z):
-        """
-
-        :param z: 1-D or 2-D array
-        :return:
-        """
-        z_dim = len(z.shape)
-        if z_dim == 1:
-            z = z.reshape(1, -1)
-        e_z = np.exp(z)
-        e_sum = np.sum(e_z, axis=1)
-        res = np.divide(e_z.T, e_sum).T
-        if z_dim == 1:
-            res = res.flatten()
-        return res
-
-    @staticmethod
-    def softmax_prime(z):
-        """
-        :param z: 1-D or 2-D array
-        :return:
-        """
-        def base_diff(e):
-            """
-            :param e: 1-D array
-            :return:
-            """
-            return np.diag(e) - e.reshape(-1, 1) @ e.reshape(1, -1)
-
-        y = Activation.softmax(z)
-        z_dim = len(z.shape)
-        if z_dim == 1:
-            res = base_diff(y)
-        else:
-            res = np.apply_along_axis(base_diff, 1, y)
-        return res
-
-
-class QuadraticSoftmaxCost:
-    @staticmethod
-    def fn(a, y, from_logits=False):
-        if from_logits:
-            a = Activation.softmax(a)
-        return 0.5 * np.sum((a - y) ** 2)
-
-    @staticmethod
-    def init_delta(z, a, y):
-        """
-
-        :param z: 2-D array
-        :param a: 2-D array
-        :param y: 2-D array
-        :return:
-        """
-        d = a - y
-        sd = Activation.softmax_prime(z)
-        res = np.array([i_d @ i_sd for i_d, i_sd in zip(d, sd)])
-        return res
-
-
-class CrossEntropySoftmaxCost:
-    @staticmethod
-    def fn(a, y, from_logits=False):
-        if from_logits:
-            a = Activation.softmax(a)
-        return np.sum(np.nan_to_num(-y * np.log(a) - (1 - y) * np.log(1 - a)))
-
-    @staticmethod
-    def init_delta(z, a, y):
-        d = np.nan_to_num(-y / a + (1 - y) / (1 - a))
-        sd = Activation.softmax_prime(z)
-        res = np.array([i_d @ i_sd for i_d, i_sd in zip(d, sd)])
-        return res
+from utils.functional import Functional
+from utils.cost import CrossEntropyCost
 
 
 class FNN(object):
-    def __init__(self, sizes, activation='relu'):
+    def __init__(self, sizes, cost=CrossEntropyCost(), activation='relu'):
         # 网络层数
         self.num_layers = len(sizes)
         # 网络每层神经元个数
         self.sizes = sizes
+        self.output_dims = self.sizes[-1]
         self.biases = [np.random.randn(y) for y in self.sizes[1:]]
         self.weights = [np.random.randn(y, x) / np.sqrt(x)
                         for x, y in zip(self.sizes[:-1], self.sizes[1:])]
-        self.cost = CrossEntropySoftmaxCost
-        self.activation = getattr(Activation, activation)
-        self.activation_prime = getattr(Activation, f'{activation}_prime')
-        self.activation_last = Activation.softmax
+        self.cost = cost
+        self.activation = getattr(Functional, activation)
+        self.activation_prime = getattr(Functional, f'{activation}_prime')
 
         # use for adam
         # fm*: 记录梯度的指数加权平均
@@ -139,12 +40,33 @@ class FNN(object):
         for b, w in zip(self.biases[:-1], self.weights[:-1]):
             a = self.activation(a @ w.T + b)
         b, w = self.biases[-1], self.weights[-1]
-        a = self.activation_last(a @ w.T + b)
+        a = a @ w.T + b
+        if self.cost.activation is not None:
+            a = self.cost.activation(a)
         return a
 
     def train(self, training_data, epochs=20, mini_batch_size=10, eta=0.001,
               beta1=0.9, beta2=0.999,
-              lambda_=0.0, test_data=None):
+              lambda_=0.0, validation_data=None):
+        """
+        model training
+        Args:
+            training_data: tuple->(features, labels),
+                features shape: (n_samples, n_features),
+                labels shape: (n_samples, n_classes)(one-hot encoding or other encoding format)
+            epochs:
+            mini_batch_size:
+            eta: learning rate
+            beta1: corresponding to adam beta1
+            beta2: corresponding to adam beta2
+            lambda_: the regularization of weights
+            validation_data: tuple->(features, labels),
+                features shape: (n_samples, n_features),
+                labels shape: (n_samples, )
+
+        Returns:
+
+        """
         # 初始化全局梯度
         self.init_adam()
         train_features, train_labels = training_data
@@ -173,14 +95,16 @@ class FNN(object):
 
             cost = self.total_cost(training_data)
             print("Cost on training data: {}".format(cost))
-            accuracy = self.accuracy(training_data, convert=True)
-            print("Accuracy on training data: {}".format(accuracy))
+            if self.output_dims > 1:
+                accuracy = self.accuracy(training_data, encoding=True)
+                print("Accuracy on training data: {}".format(accuracy))
 
-            if test_data is not None:
-                cost = self.total_cost(test_data, convert=True)
+            if validation_data is not None:
+                cost = self.total_cost(validation_data, convert=True)
                 print("Cost on test data: {}".format(cost))
-                accuracy = self.accuracy(test_data)
-                print("Accuracy on test data: {}".format(accuracy))
+                if self.output_dims > 1:
+                    accuracy = self.accuracy(validation_data)
+                    print("Accuracy on test data: {}".format(accuracy))
 
     def adam(self, mini_batch, iter_counts, eta=0.001,
              beta1=0.9, beta2=0.999, lambda_=0.0):
@@ -228,8 +152,8 @@ class FNN(object):
             # 计算每层的y
             if layer_count < self.num_layers - 1:
                 activation = self.activation(z)
-            else:
-                activation = self.activation_last(z)
+            elif self.cost.activation is not None:
+                activation = self.cost.activation(z)
 
             # 保存每一层的y
             activations.append(activation)
@@ -259,29 +183,51 @@ class FNN(object):
 
         return nabla_b, nabla_w
 
-    def accuracy(self, data, convert=False):
+    def accuracy(self, data, encoding=False):
+        """
+        计算准确率，只有分类问题才可以调用该方法
+        Args:
+            data:
+            encoding: 为True时，表示每个样本的标签为编码向量
+
+        Returns:
+
+        """
         x, y = data
         a = self.feedforward(x)
         a = np.argmax(a, axis=1)
-        if convert:
+        if encoding:
             y = np.argmax(y, axis=1)
         res = np.sum(a == y, dtype=int) / len(y)
         return f'{res:.2%}'
 
     def total_cost(self, data, convert=False):
+        """
+        计算损失
+        Args:
+            data:
+            convert: 分类问题才使用到该参数；等于True时，说明每个样本的标签为标量，需要将标签转换为编码向量
+                注：这里由于我对训练数据标签的编码方式为one-hot编码，就暂时写死了，读者可以对编码方式进行替换
+
+        Returns:
+
+        """
         x, y = data
         a = self.feedforward(x)
-        if convert:
-            y = np.eye(10)[y]
+        if self.output_dims > 1 and convert:  # 分类问题
+            y = np.eye(self.output_dims)[y]
+        elif self.output_dims == 1:  # 回归问题
+            y = y.flatten()
+            a = a.flatten()
         cost = self.cost.fn(a, y) / len(y)
         return cost
 
     def save(self, filename):
-        """Save the neural network to the file ``filename``."""
-        data = {"sizes": self.sizes,
-                "weights": [w.tolist() for w in self.weights],
-                "biases": [b.tolist() for b in self.biases],
-                "activation": self.activation}
+        data = {'sizes': self.sizes,
+                'weights': [w.tolist() for w in self.weights],
+                'biases': [b.tolist() for b in self.biases],
+                'cost': self.cost,
+                'activation': self.activation}
         f = open(filename, "w")
         json.dump(data, f)
         f.close()
@@ -291,7 +237,7 @@ def load(filename):
     f = open(filename, "r")
     data = json.load(f)
     f.close()
-    net = FNN(data['sizes'], activation=data['activation'])
+    net = FNN(data['sizes'], cost=data['cost'], activation=data['activation'])
     net.weights = [np.array(w) for w in data['weights']]
     net.biases = [np.array(b) for b in data['biases']]
     return net
