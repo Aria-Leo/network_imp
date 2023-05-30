@@ -118,7 +118,8 @@ class FNN:
             if self.output_dims > 1:
                 accuracy = self.accuracy((X, y), predict=output_y)
                 print(f'Accuracy on test data: {accuracy}')
-                output_y = np.argmax(output_y, axis=1)
+        if self.output_dims > 1:
+            output_y = np.argmax(output_y, axis=1)
         return output_y
 
     def adam(self, mini_batch, iter_counts, eta=0.001,
