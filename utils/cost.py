@@ -1,6 +1,6 @@
 import numpy as np
-from functional import Functional
 from abc import ABCMeta, abstractmethod
+from .functional import Functional
 
 
 class Cost(metaclass=ABCMeta):

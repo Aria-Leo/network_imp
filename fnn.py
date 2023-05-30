@@ -8,7 +8,7 @@ from utils.functional import Functional
 from utils.cost import CrossEntropyCost
 
 
-class FNN(object):
+class FNN:
     def __init__(self, sizes, cost=CrossEntropyCost(), activation='relu'):
         # 网络层数
         self.num_layers = len(sizes)
@@ -45,9 +45,9 @@ class FNN(object):
             a = self.cost.activation(a)
         return a
 
-    def train(self, training_data, epochs=20, mini_batch_size=10, eta=0.001,
-              beta1=0.9, beta2=0.999,
-              lambda_=0.0, validation_data=None):
+    def fit(self, training_data, epochs=20, mini_batch_size=10, eta=0.001,
+            beta1=0.9, beta2=0.999,
+            lambda_=0.0, validation_data=None):
         """
         model training
         Args:
@@ -70,6 +70,10 @@ class FNN(object):
         # 初始化全局梯度
         self.init_adam()
         train_features, train_labels = training_data
+        if self.output_dims > 1:
+            train_labels = np.eye(self.output_dims)[train_labels]
+        else:
+            train_labels = train_labels.reshape(-1, 1)
         # 训练数据总个数
         n = train_features.shape[0]
         random_index = np.arange(n)
@@ -91,20 +95,31 @@ class FNN(object):
                           beta1=beta1, beta2=beta2, lambda_=lambda_)
                 iter_counts += 1
 
-            print("Epoch %s training complete" % j)
+            print(f'Epoch {j} training complete')
 
-            cost = self.total_cost(training_data)
-            print("Cost on training data: {}".format(cost))
+            cost = self.total_cost(training_data, convert=True)
+            print(f'Cost on training data: {cost}')
             if self.output_dims > 1:
-                accuracy = self.accuracy(training_data, encoding=True)
-                print("Accuracy on training data: {}".format(accuracy))
+                accuracy = self.accuracy(training_data)
+                print(f'Accuracy on training data: {accuracy}')
 
             if validation_data is not None:
                 cost = self.total_cost(validation_data, convert=True)
-                print("Cost on test data: {}".format(cost))
+                print(f'Cost on validation data: {cost}')
                 if self.output_dims > 1:
                     accuracy = self.accuracy(validation_data)
-                    print("Accuracy on test data: {}".format(accuracy))
+                    print(f'Accuracy on validation data: {accuracy}')
+
+    def predict(self, X, y=None):
+        output_y = self.feedforward(X)
+        if y is not None:
+            cost = self.total_cost((X, y), predict=output_y, convert=True)
+            print(f'Cost on test data: {cost}')
+            if self.output_dims > 1:
+                accuracy = self.accuracy((X, y), predict=output_y)
+                print(f'Accuracy on test data: {accuracy}')
+                output_y = np.argmax(output_y, axis=1)
+        return output_y
 
     def adam(self, mini_batch, iter_counts, eta=0.001,
              beta1=0.9, beta2=0.999, lambda_=0.0):
@@ -183,29 +198,34 @@ class FNN(object):
 
         return nabla_b, nabla_w
 
-    def accuracy(self, data, encoding=False):
+    def accuracy(self, data, predict=None, encoding=False):
         """
         计算准确率，只有分类问题才可以调用该方法
         Args:
             data:
+            predict: data对应的预测结果
             encoding: 为True时，表示每个样本的标签为编码向量
 
         Returns:
 
         """
         x, y = data
-        a = self.feedforward(x)
+        if predict is None:
+            a = self.feedforward(x)
+        else:
+            a = predict
         a = np.argmax(a, axis=1)
         if encoding:
             y = np.argmax(y, axis=1)
         res = np.sum(a == y, dtype=int) / len(y)
         return f'{res:.2%}'
 
-    def total_cost(self, data, convert=False):
+    def total_cost(self, data, predict=None, convert=False):
         """
         计算损失
         Args:
             data:
+            predict: data对应的预测结果
             convert: 分类问题才使用到该参数；等于True时，说明每个样本的标签为标量，需要将标签转换为编码向量
                 注：这里由于我对训练数据标签的编码方式为one-hot编码，就暂时写死了，读者可以对编码方式进行替换
 
@@ -213,7 +233,10 @@ class FNN(object):
 
         """
         x, y = data
-        a = self.feedforward(x)
+        if predict is None:
+            a = self.feedforward(x)
+        else:
+            a = predict
         if self.output_dims > 1 and convert:  # 分类问题
             y = np.eye(self.output_dims)[y]
         elif self.output_dims == 1:  # 回归问题

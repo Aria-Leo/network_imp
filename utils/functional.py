@@ -151,9 +151,9 @@ class Functional:
             if conv_mode == 'math':
                 s_kernel = np.rot90(s_kernel, 2)
             if dilated_kernel > 0:
-                s_kernel = Function.add_dilation(s_kernel, dilated_kernel)
+                s_kernel = Functional.add_dilation(s_kernel, dilated_kernel)
             if dilated_feature > 0:
-                s_input = Function.add_dilation(s_input, dilated_feature)
+                s_input = Functional.add_dilation(s_input, dilated_feature)
             s_input = np.pad(s_input, pad_width=padding_size)
             result = []
             out_shape_h = (s_input.shape[0] - kernel_size) // stride + 1
