@@ -97,7 +97,8 @@ class Functional:
 
     @staticmethod
     def conv2d(input_, kernel, stride=1, padding='same',
-               conv_mode='normal', dilated_feature=0, dilated_kernel=0):
+               conv_mode='normal', dilated_feature=0, dilated_kernel=0,
+               output_shrink=0, output_padding=0):
         """
         定义一下计算规则：
         1.input_->(h_in, w_in), kernel->(kernel_size, kernel_size):
@@ -124,11 +125,16 @@ class Functional:
                                      0 0 0 0 0
                                      7 0 8 0 9]
             dilated_kernel: 对kernel相邻元素添加空洞，含义与dilated_feature类似
+            output_shrink: int or (tuple, list, np.ndarray), 表示删除输出结果外围的行和列，
+                效果与使用np.pad相反，生效顺序在output_padding之前
+            output_padding: int or (tuple, list, np.ndarray), 对输出结果进行padding
 
         Returns:
 
         """
-        kernel_size = kernel.shape[0]
+        kernel_size = kernel.shape[-1]
+        if dilated_kernel > 0:
+            kernel_size = (kernel_size - 1) * (dilated_kernel + 1) + 1
         if padding == 'same':
             padding_size = kernel_size // 2
         elif padding == 'valid':
@@ -155,16 +161,30 @@ class Functional:
             if dilated_feature > 0:
                 s_input = Functional.add_dilation(s_input, dilated_feature)
             s_input = np.pad(s_input, pad_width=padding_size)
-            result = []
             out_shape_h = (s_input.shape[0] - kernel_size) // stride + 1
             out_shape_w = (s_input.shape[1] - kernel_size) // stride + 1
-            for i in range(out_shape_h):
-                for j in range(out_shape_w):
-                    temp_res = np.sum(s_input[i * stride: i * stride + kernel_size,
-                                      j * stride: j * stride + kernel_size]
-                                      * s_kernel)
+            row_start, row_end = 0, out_shape_h
+            col_start, col_end = 0, out_shape_w
+            if isinstance(output_shrink, int):
+                row_start += output_shrink
+                col_start += output_shrink
+                row_end -= output_shrink
+                col_end -= output_shrink
+            elif isinstance(output_shrink, (tuple, list, np.ndarray)):
+                row_start += output_shrink[0]
+                col_start += output_shrink[0]
+                row_end -= output_shrink[1]
+                col_end -= output_shrink[1]
+            result = []
+            for i in range(row_start, row_end):
+                for j in range(col_start, col_end):
+                    input_patch = s_input[i * stride: i * stride + kernel_size,
+                                          j * stride: j * stride + kernel_size]
+                    temp_res = np.sum(input_patch * s_kernel)
                     result.append(temp_res)
-            result = np.reshape(result, (out_shape_h, out_shape_w))
+            result = np.reshape(result, (row_end - row_start, col_end - col_start))
+            if isinstance(output_padding, (tuple, list, np.ndarray)) or output_padding > 0:
+                result = np.pad(result, output_padding)
             res.append(result)
         res = np.array(res)
         return res

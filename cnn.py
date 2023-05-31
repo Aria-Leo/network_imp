@@ -46,11 +46,14 @@ class Dense(Layer):
             output: np.array, shape: (n, out_features)
 
         """
+        print('Flow into dense layer...')
+        print(f'Input shape: {inputs.shape}')
         output = inputs @ self.weights.T + self.biases
         self.output_linear__ = output
         if self.activation is not None:
             self.output_activation_prime__ = self.activation_prime(output)
             output = self.activation(output)
+        print(f'Output shape: {output.shape}')
         return output
 
 
@@ -89,18 +92,21 @@ class Conv2d(Layer):
             output: np.array, shape: (n, c_out, h_out, w_out)
 
         """
+        print('Flow into conv2d layer...')
+        print(f'Input shape: {inputs.shape}')
         if len(inputs.shape) == 3:
             inputs = np.expand_dims(inputs, axis=0)
         with ProcessPoolExecutor(max_workers=3) as executor:
-            output_linear = np.array(executor.map(self.__conv_all, inputs))
+            output_linear = np.array(list(executor.map(self._conv_all, inputs)))
         output = output_linear.sum(axis=2) + self.biases[np.newaxis, :, np.newaxis, np.newaxis]
         if self.activation is not None:
             self.output_activation_prime__ = self.activation_prime(output)
             output = self.activation(output)
+        print(f'Output shape: {output.shape}')
 
         return output
 
-    def __conv_all(self, single_input):
+    def _conv_all(self, single_input):
         """
 
         Args:
@@ -123,6 +129,8 @@ class Flatten(Layer):
         self.end_dim = end_dim
 
     def forward(self, inputs):
+        print('Flow into flatten layer...')
+        print(f'Input shape: {inputs.shape}')
         shape_size = len(inputs.shape)
         if self.end_dim < 0:
             end_dim = shape_size + 1 - self.end_dim
@@ -130,6 +138,7 @@ class Flatten(Layer):
             end_dim = self.end_dim + 1
         assert self.start_dim < end_dim, 'invalid dim input!'
         output = inputs.reshape(*inputs.shape[:self.start_dim], -1, *inputs.shape[end_dim:])
+        print(f'Output shape: {output.shape}')
         return output
 
     def __call__(self, *args, **kwargs):
@@ -138,7 +147,7 @@ class Flatten(Layer):
 
 class Adam:
 
-    def __init__(self, eta=0.001, beta1=0.9, beta2=0.999, lambda_=0.0):
+    def __init__(self, eta=0.001, beta1=0.9, beta2=0.999, lambda_=0.01):
         self.eta = eta
         self.beta1 = beta1
         self.beta2 = beta2
@@ -164,7 +173,7 @@ class Adam:
 
         current_info = self.gradient_index_info[name]
         current_info['fm'] = self.beta1 * current_info['fm'] + (1 - self.beta1) * parameter_gradient
-        current_info['sm'] = (self.beta2 * current_info['fm']
+        current_info['sm'] = (self.beta2 * current_info['sm']
                               + np.nan_to_num((1 - self.beta2) * parameter_gradient * parameter_gradient))
 
         # 在初始迭代时需要放大梯度
@@ -235,6 +244,25 @@ class CNN:
             self.outputs_linear_last__ = self.sequential[-1].output_linear__
         return output
 
+    @staticmethod
+    def _cal_dw(dz, layer_input, padding, dilated_kernel):
+        # sub_dw shape: (n, kernel_size, kernel_size)
+        feature_size = layer_input.shape[-1]
+        output_shrink = 1 if feature_size % 2 == 0 else 0
+        sub_dw = Functional.conv2d(layer_input, dz, padding=padding,
+                                   dilated_kernel=dilated_kernel, output_shrink=(0, output_shrink))
+        sub_dw = np.sum(sub_dw, axis=0)
+        return sub_dw
+
+    @staticmethod
+    def _cal_dz(dz, layer_weights, padding, dilated_feature, output_shrink, output_padding):
+        # 求解dz是数学中的卷积
+        sub_current_dz = Functional.conv2d(dz, layer_weights,
+                                           padding=padding, dilated_feature=dilated_feature, conv_mode='math',
+                                           output_shrink=output_shrink, output_padding=output_padding)
+        sub_current_dz = np.sum(sub_current_dz, axis=0)
+        return sub_current_dz
+
     def backward(self, labels):
         """
         calculate gradients per layer
@@ -262,38 +290,38 @@ class CNN:
                 self.gradients['biases'].appendleft(None)
                 self.gradients['weights'].appendleft(None)
                 last_conv_shape = self.outputs_[-layer-1].shape
-                dz = dz.reshape(*last_conv_shape)  # shape: (n, c_last, h_last, w_last)
+                dz = dz.reshape(last_conv_shape)  # shape: (n, c_last, h_last, w_last)
             else:
-                db = np.sum(dz, axis=(0, 2, 3)) / len(labels) # shape: (c_out,)
+                db = np.sum(dz, axis=(0, 2, 3)) / len(labels)  # shape: (c_out,)
                 layer_input = self.outputs_[-layer-1]  # shape: (n, c_in, h_in, w_in)
-                padding = layer_obj.padding
-                stride = layer_obj.stride
                 kernel_size = layer_obj.kernel_size
+                padding = layer_obj.padding
+                if padding == 'same':
+                    padding = kernel_size // 2
                 iter_dz = dz.transpose(1, 0, 2, 3)
                 iter_layer_input = layer_input.transpose(1, 0, 2, 3)
-                dw = []  # desired shape: (c_out, c_in, kernel_size, kernel_size)
                 layer_weights = layer_obj.weights  # shape: (c_out, c_in, kernel_size, kernel_size)
-                for sub_dz in iter_dz:
-                    for sub_layer_input in iter_layer_input:
-                        # sub_dw shape: (n, kernel_size, kernel_size)
-                        sub_dw = Functional.conv2d(sub_layer_input, sub_dz, padding=padding, dilated_kernel=stride-1)
-                        sub_dw = np.sum(sub_dw, axis=0)
-                        dw.append(sub_dw)
-                dw = np.reshape(dw, *layer_weights.shape) / len(labels)
+                stride = layer_obj.stride
+                with Pool(processes=10) as pool:
+                    # desired shape: (c_out, c_in, kernel_size, kernel_size)
+                    dw = np.array(pool.starmap(
+                        CNN._cal_dw, ((sub_dz, sub_layer_input, padding, stride-1)
+                                      for sub_dz in iter_dz for sub_layer_input in iter_layer_input)))
+                dw = np.reshape(dw, layer_weights.shape) / len(labels)
                 self.gradients['biases'].appendleft(db)
                 self.gradients['weights'].appendleft(dw)
                 iter_layer_weights = layer_weights.transpose(1, 0, 2, 3)
                 # 计算当前层的dz, shape: (n, c_in, h_in, w_in)
-                current_dz = []
-                for sub_dz in dz:
-                    for sub_layer_weights in iter_layer_weights:
-                        # 求解dz是数学中的卷积
-                        sub_current_dz = Functional.conv2d(sub_dz, sub_layer_weights,
-                                                           padding=kernel_size-1, dilated_feature=stride-1,
-                                                           conv_mode='math')
-                        sub_current_dz = np.sum(sub_current_dz, axis=0)
-                        current_dz.append(sub_current_dz)
-                dz = np.reshape(current_dz, *layer_input.shape) * self.outputs_activation_prime__[-layer-1]
+                with Pool(processes=10) as pool:
+                    layer_input_size = layer_input.shape[-1]
+                    input_padding = padding
+                    output_shrink = 1 if input_padding > 0 else 0
+                    output_padding = (0, 1) if layer_input_size % 2 == 0 else 0
+                    current_dz = np.array(pool.starmap(
+                        CNN._cal_dz, ((sub_dz, sub_layer_weights, kernel_size-1, stride-1,
+                                       output_shrink, output_padding)
+                                      for sub_dz in dz for sub_layer_weights in iter_layer_weights)))
+                dz = np.reshape(current_dz, layer_input.shape) * self.outputs_activation_prime__[-layer-1]
 
     def fit(self, features, labels, epochs=10, batch_size=10, validation_data=None):
         # 初始化梯度相关指标的记录
@@ -302,6 +330,10 @@ class CNN:
         n = features.shape[0]
         random_index = np.arange(n)
         # 开始训练 循环每一个epochs
+        if self.output_dims > 1:
+            labels = np.eye(self.output_dims)[labels]
+        else:
+            labels = labels.reshape(-1, 1)
         for j in range(epochs):
             # 洗牌 打乱训练数据
             random.shuffle(random_index)
@@ -353,21 +385,34 @@ class CNN:
             if validation_data is not None:
                 valid_features, valid_labels = validation_data
                 if self.output_dims > 1:
-                    valid_labels = np.eye(self.output_dims)[valid_labels]
+                    encoding_labels = np.eye(self.output_dims)[valid_labels]
                 else:
-                    valid_labels = valid_labels.reshape(-1, 1)
+                    encoding_labels = valid_labels.reshape(-1, 1)
                 valid_output = self.forward(valid_features)
-                total_cost = self.cost.fn(valid_output, valid_labels) / len(valid_labels)
+                total_cost = self.cost.fn(valid_output, encoding_labels) / len(valid_labels)
                 print(f'epoch {j} total cost on validation data: {total_cost}')
                 if self.output_dims > 1:
-                    true_res = np.argmax(valid_labels, axis=1)
                     predict_res = np.argmax(valid_output, axis=1)
-                    accuracy = np.sum(true_res == predict_res, dtype=int) / len(valid_labels)
+                    accuracy = np.sum(valid_labels == predict_res, dtype=int) / len(valid_labels)
                     print(f'epoch {j} accuracy on validation data: {accuracy:.2%}')
 
         # 清空缓存变量
         self.init_cache()
 
-    def predict(self, features):
-        output = self.forward(features)
+    def predict(self, X, y=None):
+        output = self.forward(X)
+        if y is not None:
+            if self.output_dims > 1:
+                encoding_y = np.eye(self.output_dims)[y]
+            else:
+                encoding_y = y.reshape(-1, 1)
+            total_cost = self.cost.fn(output, encoding_y) / len(y)
+            print(f'total cost on test data: {total_cost}')
+            if self.output_dims > 1:
+                output = np.argmax(output, axis=1)
+                accuracy = np.sum(output == y, dtype=int) / len(y)
+                print(f'accuracy on test data: {accuracy:.2%}')
+        elif self.output_dims > 1:
+            output = np.argmax(output, axis=1)
+
         return output

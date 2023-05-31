@@ -8,7 +8,7 @@ import pandas as pd
 class PKLDataLoader:
 
     @staticmethod
-    def load(pkl_file_path):
+    def load(pkl_file_path, visualization=False, aspect_ratio=1, channels=1):
         f = gzip.open(pkl_file_path, 'rb')
         data = pickle.load(f, encoding='bytes')
         f.close()
@@ -16,6 +16,11 @@ class PKLDataLoader:
         # 数据统一归一化到[-1, 1]
         for obj in data:
             features, labels = obj
+            if len(features.shape) == 2 and visualization:
+                area = features.shape[1]
+                row_length = int(np.sqrt(area / channels / aspect_ratio))
+                col_length = int(aspect_ratio * row_length)
+                features = features.reshape(features.shape[0], channels, row_length, col_length)
             feature_min = features.min()
             feature_max = features.max()
             if feature_max - feature_min <= 1:  # [0, 1]
@@ -29,7 +34,7 @@ class PKLDataLoader:
 class CSVDataLoader:
 
     @staticmethod
-    def load(zip_file_path):
+    def load(zip_file_path, visualization=False, aspect_ratio=1, channels=1):
         # train validation test
         processed_data = [None, None, None]
         with zipfile.ZipFile(zip_file_path, mode='r') as zip_filer:
@@ -39,6 +44,11 @@ class CSVDataLoader:
                 with zip_filer.open(file_name, mode='r') as filer:
                     data = pd.read_csv(filer)
                     features, labels = data.drop('label', axis=1).values, data['label'].values
+                    if len(features.shape) == 2 and visualization:
+                        area = features.shape[1]
+                        row_length = int(np.sqrt(area / channels / aspect_ratio))
+                        col_length = int(aspect_ratio * row_length)
+                        features = features.reshape(features.shape[0], channels, row_length, col_length)
                     # 归一化到[-1, 1]
                     feature_min = features.min()
                     feature_max = features.max()
