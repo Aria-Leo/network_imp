@@ -1,4 +1,5 @@
 import numpy as np
+from dll import convolution
 
 
 class Functional:
@@ -185,6 +186,48 @@ class Functional:
             result = np.reshape(result, (row_end - row_start, col_end - col_start))
             if isinstance(output_padding, (tuple, list, np.ndarray)) or output_padding > 0:
                 result = np.pad(result, output_padding)
+            res.append(result)
+        res = np.array(res)
+        return res
+
+    @staticmethod
+    def conv2d_opt(input_, kernel, stride=1, padding='same',
+                   conv_mode='normal', dilated_feature=0, dilated_kernel=0,
+                   output_shrink=0, output_padding=0):
+        kernel_size = kernel.shape[-1]
+        if dilated_kernel > 0:
+            kernel_size = (kernel_size - 1) * (dilated_kernel + 1) + 1
+        if padding == 'same':
+            padding_size = kernel_size // 2
+        elif padding == 'valid':
+            padding_size = 0
+        else:
+            padding_size = padding
+        res = []
+        input_shape_len = len(input_.shape)
+        kernel_shape_len = len(kernel.shape)
+        if input_shape_len == kernel_shape_len:
+            if input_shape_len == 2:
+                input_ = np.expand_dims(input_, axis=0)
+                kernel = np.expand_dims(kernel, axis=0)
+        else:
+            if input_shape_len == 2:
+                input_ = (input_ for _ in range(kernel.shape[0]))
+            else:
+                kernel = (kernel for _ in range(input_.shape[0]))
+        output_shrink_l = output_shrink_r = output_shrink
+        if isinstance(output_shrink, (list, tuple, np.ndarray)):
+            output_shrink_l = output_shrink[0]
+            output_shrink_r = output_shrink[1]
+        output_padding_l = output_padding_r = output_padding
+        if isinstance(output_padding, (list, tuple, np.ndarray)):
+            output_padding_l = output_padding[0]
+            output_padding_r = output_padding[1]
+        for s_input, s_kernel in zip(input_, kernel):
+            result = convolution.conv2d(s_input, s_kernel, stride, padding_size,
+                                        conv_mode, dilated_feature, dilated_kernel,
+                                        output_shrink_l, output_shrink_r,
+                                        output_padding_l, output_padding_r)
             res.append(result)
         res = np.array(res)
         return res
