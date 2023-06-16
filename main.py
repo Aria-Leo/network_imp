@@ -19,10 +19,6 @@ if __name__ == '__main__':
         Flatten(),
         Dense(2 * 2 * 512, 10)
     ])
-    sub_samples = 100
-    sub_train_data = (training_data[0][:sub_samples], training_data[1][:sub_samples])
-    sub_validation_data = (validation_data[0][:sub_samples], validation_data[1][:sub_samples])
-    sub_test_data = (test_data[0][:sub_samples], test_data[1][:sub_samples])
-    net.fit(sub_train_data[0], sub_train_data[1], epochs=10, batch_size=50,
-            validation_data=sub_validation_data)
-    net.predict(sub_test_data[0], y=sub_test_data[1])
+    net.fit(training_data[0], training_data[1], epochs=10, batch_size=50,
+            validation_data=validation_data)
+    net.predict(test_data[0], y=test_data[1])
