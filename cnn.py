@@ -1,10 +1,7 @@
 import random
 from abc import ABCMeta, abstractmethod
 import numpy as np
-from multiprocessing import Pool
-from concurrent.futures import ProcessPoolExecutor
 from collections import deque, defaultdict
-from functools import partial
 
 from utils.functional import Functional
 from utils.cost import CrossEntropyCost
@@ -98,8 +95,11 @@ class Conv2d(Layer):
         print(f'Input shape: {inputs.shape}')
         if len(inputs.shape) == 3:
             inputs = np.expand_dims(inputs, axis=0)
-        with ProcessPoolExecutor(max_workers=3) as executor:
-            output_linear = np.array(list(executor.map(self._conv_all, inputs)))
+
+        # inputs shape: (N, c_out, c_in, h_in, w_in)
+        inputs = np.expand_dims(inputs, axis=1).repeat(self.weights.shape[0], axis=1)
+        output_linear = Functional.convnd(inputs, self.weights,
+                                          stride=self.stride, padding=self.padding)
         output = output_linear.sum(axis=2) + self.biases[np.newaxis, :, np.newaxis, np.newaxis]
         if self.activation is not None:
             self.output_activation_prime__ = self.activation_prime(output)
@@ -107,21 +107,6 @@ class Conv2d(Layer):
         print(f'Output shape: {output.shape}')
 
         return output
-
-    def _conv_all(self, single_input):
-        """
-
-        Args:
-            single_input: np.array, shape: (c_in, h_in, w_in)
-
-        Returns:
-            outputs: np.array, shape: (c_out, c_in, h_out, w_out)
-
-        """
-        conv_single = partial(Functional.conv2d_opt, single_input, stride=self.stride, padding=self.padding)
-        with Pool(processes=3) as pool:
-            outputs = np.array(pool.map(conv_single, self.weights))
-        return outputs
 
 
 class Flatten(Layer):
@@ -246,25 +231,6 @@ class CNN:
             self.outputs_linear_last__ = self.sequential[-1].output_linear__
         return output
 
-    @staticmethod
-    def _cal_dw(dz, layer_input, padding, dilated_kernel):
-        # sub_dw shape: (n, kernel_size, kernel_size)
-        feature_size = layer_input.shape[-1]
-        output_shrink = 1 if feature_size % 2 == 0 else 0
-        sub_dw = Functional.conv2d_opt(layer_input, dz, padding=padding,
-                                       dilated_kernel=dilated_kernel, output_shrink=(0, output_shrink))
-        sub_dw = np.sum(sub_dw, axis=0)
-        return sub_dw
-
-    @staticmethod
-    def _cal_dz(dz, layer_weights, padding, dilated_feature, output_shrink, output_padding):
-        # 求解dz是数学中的卷积
-        sub_current_dz = Functional.conv2d_opt(dz, layer_weights,
-                                               padding=padding, dilated_feature=dilated_feature, conv_mode='math',
-                                               output_shrink=output_shrink, output_padding=output_padding)
-        sub_current_dz = np.sum(sub_current_dz, axis=0)
-        return sub_current_dz
-
     def backward(self, labels):
         """
         calculate gradients per layer
@@ -301,20 +267,25 @@ class CNN:
                 padding = layer_obj.padding
                 if padding == 'same':
                     padding = kernel_size // 2
-                iter_dz = dz.transpose(1, 0, 2, 3)
+                # shape: (c_in, N, h_in, w_in)
                 iter_layer_input = layer_input.transpose(1, 0, 2, 3)
                 layer_weights = layer_obj.weights  # shape: (c_out, c_in, kernel_size, kernel_size)
                 stride = layer_obj.stride
-                with Pool(processes=10) as pool:
-                    # desired shape: (c_out, c_in, kernel_size, kernel_size)
-                    dw = np.array(pool.starmap(
-                        CNN._cal_dw, ((sub_dz, sub_layer_input, padding, stride-1)
-                                      for sub_dz in iter_dz for sub_layer_input in iter_layer_input)))
-                dw = np.reshape(dw, layer_weights.shape) / len(labels)
+                feature_size = layer_input.shape[-1]
+                output_shrink = 1 if feature_size % 2 == 0 else 0
+                # shape: (c_out, c_in, N, h_out, w_out)
+                iter_dz = dz.transpose(1, 0, 2, 3)
+                iter_dz = np.expand_dims(iter_dz, axis=1).repeat(
+                    iter_layer_input.shape[0], axis=1)
+                dw = Functional.convnd(iter_layer_input, iter_dz, padding=padding,
+                                         dilated_kernel=stride - 1,
+                                         output_shrink=(0, output_shrink))
+                dw = np.sum(dw, axis=2) / len(labels)
                 self.gradients['biases'].appendleft(db)
                 self.gradients['weights'].appendleft(dw)
 
-                # 计算当前层的dz, shape: (n, c_in, h_in, w_in)
+                # 计算当前层的dz
+                # shape: (c_in, c_out, kernel_size, kernel_size)
                 iter_layer_weights = layer_weights.transpose(1, 0, 2, 3)
                 layer_input_size = layer_input.shape[-1]
                 input_padding = padding
@@ -327,12 +298,15 @@ class CNN:
                         output_shrink = input_padding
                     else:
                         output_shrink = (input_padding, input_padding - 1)
-                with Pool(processes=10) as pool:
-                    current_dz = np.array(pool.starmap(
-                        CNN._cal_dz, ((sub_dz, sub_layer_weights, kernel_size-1, stride-1,
-                                       output_shrink, output_padding)
-                                      for sub_dz in dz for sub_layer_weights in iter_layer_weights)))
-                dz = np.reshape(current_dz, layer_input.shape) * self.outputs_activation_prime__[-layer-1]
+
+                # shape: (N, c_in, c_out, h_out, w_out)
+                iter_dz = np.expand_dims(dz, axis=1).repeat(
+                    iter_layer_weights.shape[0], axis=1)
+                dz = Functional.convnd(iter_dz, iter_layer_weights,
+                                         padding=kernel_size-1, dilated_feature=stride-1,
+                                         conv_mode='math', output_shrink=output_shrink,
+                                         output_padding=output_padding)
+                dz = np.sum(dz, axis=2) * self.outputs_activation_prime__[-layer-1]
             print(f'{self.num_layers - layer + 1}-{layer_type} layer db, dw, dz calculated')
 
     def fit(self, features, labels, epochs=10, batch_size=10, validation_data=None):

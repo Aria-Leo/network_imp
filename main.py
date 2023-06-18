@@ -1,3 +1,4 @@
+import time
 from fnn import FNN
 from cnn import CNN, Conv2d, Dense, Flatten
 from utils.cost import CrossEntropyCost
@@ -19,6 +20,9 @@ if __name__ == '__main__':
         Flatten(),
         Dense(2 * 2 * 512, 10)
     ])
-    net.fit(training_data[0], training_data[1], epochs=10, batch_size=50,
+    time_start = time.time()
+    net.fit(training_data[0], training_data[1], epochs=10, batch_size=100,
             validation_data=validation_data)
     net.predict(test_data[0], y=test_data[1])
+    time_end = time.time()
+    print(f'run cost time: {(time_end - time_start) / 60:.2f}min!')
