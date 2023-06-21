@@ -1,4 +1,5 @@
 import random
+import time
 from abc import ABCMeta, abstractmethod
 import numpy as np
 from collections import deque, defaultdict
@@ -98,8 +99,8 @@ class Conv2d(Layer):
 
         # inputs shape: (N, c_out, c_in, h_in, w_in)
         inputs = np.expand_dims(inputs, axis=1).repeat(self.weights.shape[0], axis=1)
-        output_linear = Functional.convnd(inputs, self.weights,
-                                          stride=self.stride, padding=self.padding)
+        output_linear = Functional.convnd_einsum(inputs, self.weights,
+                                                 stride=self.stride, padding=self.padding)
         output = output_linear.sum(axis=2) + self.biases[np.newaxis, :, np.newaxis, np.newaxis]
         if self.activation is not None:
             self.output_activation_prime__ = self.activation_prime(output)
@@ -277,9 +278,9 @@ class CNN:
                 iter_dz = dz.transpose(1, 0, 2, 3)
                 iter_dz = np.expand_dims(iter_dz, axis=1).repeat(
                     iter_layer_input.shape[0], axis=1)
-                dw = Functional.convnd(iter_layer_input, iter_dz, padding=padding,
-                                         dilated_kernel=stride - 1,
-                                         output_shrink=(0, output_shrink))
+                dw = Functional.convnd_einsum(iter_layer_input, iter_dz, padding=padding,
+                                              dilated_kernel=stride - 1,
+                                              output_shrink=(0, output_shrink))
                 dw = np.sum(dw, axis=2) / len(labels)
                 self.gradients['biases'].appendleft(db)
                 self.gradients['weights'].appendleft(dw)
@@ -302,10 +303,10 @@ class CNN:
                 # shape: (N, c_in, c_out, h_out, w_out)
                 iter_dz = np.expand_dims(dz, axis=1).repeat(
                     iter_layer_weights.shape[0], axis=1)
-                dz = Functional.convnd(iter_dz, iter_layer_weights,
-                                         padding=kernel_size-1, dilated_feature=stride-1,
-                                         conv_mode='math', output_shrink=output_shrink,
-                                         output_padding=output_padding)
+                dz = Functional.convnd_einsum(iter_dz, iter_layer_weights,
+                                              padding=kernel_size-1, dilated_feature=stride-1,
+                                              conv_mode='math', output_shrink=output_shrink,
+                                              output_padding=output_padding)
                 dz = np.sum(dz, axis=2) * self.outputs_activation_prime__[-layer-1]
             print(f'{self.num_layers - layer + 1}-{layer_type} layer db, dw, dz calculated')
 
@@ -329,8 +330,10 @@ class CNN:
             # 训练mini_batch
             total_cost = 0
             accuracy = 0
+            counts = 0
             for k in range(0, n, batch_size):
                 # 初始化缓存
+                time_batch_start = time.time()
                 self.init_cache()
                 batch_features = features[k: k + batch_size]
                 batch_labels = labels[k: k + batch_size]
@@ -360,6 +363,10 @@ class CNN:
                     true_res = np.argmax(batch_labels, axis=1)
                     predict_res = np.argmax(batch_output, axis=1)
                     accuracy += np.sum(true_res == predict_res, dtype=int)
+                time_batch_end = time.time()
+                counts += 1
+                print(f'{j} epochs train {counts} batch time cost: '
+                      f'{(time_batch_end - time_batch_start) / 60:.2f}min')
 
             # 计算总平均损失
             total_cost /= n
