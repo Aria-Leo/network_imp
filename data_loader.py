@@ -43,11 +43,12 @@ class CSVDataLoader:
                     continue
                 with zip_filer.open(file_name, mode='r') as filer:
                     data = pd.read_csv(filer)
-                    random_idx = np.random.permutation(data.shape[0])
-                    if isinstance(samples, int) and samples < data.shape[0]:
-                        data = data.iloc[random_idx[:samples]]
-                    elif isinstance(samples, float) and samples < 1:
-                        data = data.iloc[random_idx[:int(data.shape[0] * samples)]]
+                    if 'train' in file_name:
+                        random_idx = np.random.permutation(data.shape[0])
+                        if isinstance(samples, int) and samples < data.shape[0]:
+                            data = data.iloc[random_idx[:samples]]
+                        elif isinstance(samples, float) and samples < 1:
+                            data = data.iloc[random_idx[:int(data.shape[0] * samples)]]
                     features, labels = data.drop('label', axis=1).values, data['label'].values
                     if len(features.shape) == 2 and visualization:
                         area = features.shape[1]

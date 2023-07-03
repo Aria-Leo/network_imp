@@ -17,9 +17,10 @@ class Layer(metaclass=ABCMeta):
 
 class Dense(Layer):
 
-    def __init__(self, in_features, out_features, activation='softmax'):
+    def __init__(self, in_features, out_features, activation='softmax', lambda_=0.001):
         self.in_features = in_features
         self.out_features = out_features
+        self.lambda_ = lambda_
         k = np.sqrt(1 / in_features)
         self.weights = np.random.uniform(-k, k, (out_features, in_features))
         self.biases = np.random.uniform(-k, k, out_features)
@@ -60,12 +61,13 @@ class Dense(Layer):
 class Conv2d(Layer):
 
     def __init__(self, in_channels, out_channels, kernel_size=3,
-                 stride=1, padding='same', activation='relu'):
+                 stride=1, padding='same', activation='relu', lambda_=0.01):
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.kernel_size = kernel_size
         self.stride = stride
         self.padding = padding
+        self.lambda_ = lambda_
         # initialize
         k = np.sqrt(1 / (in_channels * kernel_size * kernel_size))
         self.weights = np.random.uniform(-k, k, (out_channels, in_channels, kernel_size, kernel_size))
@@ -99,7 +101,7 @@ class Conv2d(Layer):
 
         # inputs shape: (N, c_out, c_in, h_in, w_in)
         inputs = np.expand_dims(inputs, axis=1).repeat(self.weights.shape[0], axis=1)
-        output_linear = Functional.convnd_einsum(inputs, self.weights,
+        output_linear = Functional.convnd(inputs, self.weights,
                                                  stride=self.stride, padding=self.padding)
         output = output_linear.sum(axis=2) + self.biases[np.newaxis, :, np.newaxis, np.newaxis]
         if self.activation is not None:
@@ -135,11 +137,10 @@ class Flatten(Layer):
 
 class Adam:
 
-    def __init__(self, eta=0.001, beta1=0.9, beta2=0.999, lambda_=0.01):
+    def __init__(self, eta=0.001, beta1=0.9, beta2=0.999):
         self.eta = eta
         self.beta1 = beta1
         self.beta2 = beta2
-        self.lambda_ = lambda_
 
         self.gradient_index_info = None
         self.init_record()
@@ -147,7 +148,7 @@ class Adam:
     def init_record(self):
         self.gradient_index_info = defaultdict(dict)
 
-    def update(self, name, parameter, parameter_gradient):
+    def update(self, name, parameter, parameter_gradient, lambda_=0):
         # 初始化累积梯度
         if name not in self.gradient_index_info:
             # 存储梯度的指数加权平均
@@ -169,7 +170,7 @@ class Adam:
         sm_rect = current_info['sm'] / (1 - self.beta2 ** current_info['iter_counts'])
 
         # 更新参数
-        new_parameter = ((1 - self.eta * self.lambda_) * parameter
+        new_parameter = ((1 - self.eta * lambda_) * parameter
                          - self.eta * fm_rect / (np.sqrt(sm_rect) + 1e-7))
         return new_parameter
 
@@ -278,7 +279,7 @@ class CNN:
                 iter_dz = dz.transpose(1, 0, 2, 3)
                 iter_dz = np.expand_dims(iter_dz, axis=1).repeat(
                     iter_layer_input.shape[0], axis=1)
-                dw = Functional.convnd_einsum(iter_layer_input, iter_dz, padding=padding,
+                dw = Functional.convnd(iter_layer_input, iter_dz, padding=padding,
                                               dilated_kernel=stride - 1,
                                               output_shrink=(0, output_shrink))
                 dw = np.sum(dw, axis=2) / len(labels)
@@ -303,7 +304,7 @@ class CNN:
                 # shape: (N, c_in, c_out, h_out, w_out)
                 iter_dz = np.expand_dims(dz, axis=1).repeat(
                     iter_layer_weights.shape[0], axis=1)
-                dz = Functional.convnd_einsum(iter_dz, iter_layer_weights,
+                dz = Functional.convnd(iter_dz, iter_layer_weights,
                                               padding=kernel_size-1, dilated_feature=stride-1,
                                               conv_mode='math', output_shrink=output_shrink,
                                               output_padding=output_padding)
@@ -350,12 +351,13 @@ class CNN:
                         continue
                     weight = self.sequential[layer-1].weights
                     bias = self.sequential[layer-1].biases
+                    lambda_ = self.sequential[layer-1].lambda_
                     layer_weight_name = f'{layer}_weight'
                     layer_bias_name = f'{layer}_bias'
                     self.sequential[layer-1].weights = self.optimizer.update(
-                        layer_weight_name, weight, weight_gradient)
+                        layer_weight_name, weight, weight_gradient, lambda_)
                     self.sequential[layer-1].biases = self.optimizer.update(
-                        layer_bias_name, bias, bias_gradient)
+                        layer_bias_name, bias, bias_gradient, lambda_)
                     layer += 1
 
                 total_cost += self.cost.fn(batch_output, batch_labels)
