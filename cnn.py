@@ -274,7 +274,7 @@ class CNN:
                 layer_weights = layer_obj.weights  # shape: (c_out, c_in, kernel_size, kernel_size)
                 stride = layer_obj.stride
                 feature_size = layer_input.shape[-1]
-                output_shrink = 1 if feature_size % 2 == 0 else 0
+                output_shrink = 1 if feature_size % 2 == 0 and stride > 1 else 0
                 # shape: (c_out, c_in, N, h_out, w_out)
                 iter_dz = dz.transpose(1, 0, 2, 3)
                 iter_dz = np.expand_dims(iter_dz, axis=1).repeat(
@@ -292,14 +292,17 @@ class CNN:
                 layer_input_size = layer_input.shape[-1]
                 input_padding = padding
                 output_shrink = output_padding = 0
-                if input_padding == 0:
-                    if layer_input_size % 2 != 0:
-                        output_padding = (0, 1)
+                if stride == 1:
+                    output_shrink = input_padding
                 else:
-                    if layer_input_size % 2 != 0:
-                        output_shrink = input_padding
+                    if input_padding == 0:
+                        if layer_input_size % 2 == 0:
+                            output_padding = (0, 1)
                     else:
-                        output_shrink = (input_padding, input_padding - 1)
+                        if layer_input_size % 2 != 0:
+                            output_shrink = input_padding
+                        else:
+                            output_shrink = (input_padding, input_padding - 1)
 
                 # shape: (N, c_in, c_out, h_out, w_out)
                 iter_dz = np.expand_dims(dz, axis=1).repeat(
