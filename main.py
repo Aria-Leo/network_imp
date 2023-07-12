@@ -97,7 +97,7 @@ if __name__ == '__main__':
     # 使用DNN网络时，需要把CSVDataLoader.load方法的visualization参数设置为False，即保持向量的形式。
     # 使用CNN时，该参数需要设置为True，将输入数据reshape为(n,c,h,w)的图片格式
     training_data, validation_data, test_data = CSVDataLoader.load(r'data/fashion_mnist.zip',
-                                                                   visualization=False, training_samples=2000,
+                                                                   visualization=True, training_samples=2000,
                                                                    train_valid_split=0.8, test_samples=500)
     print(f'training features shape: {training_data[0].shape}, labels shape: {training_data[1].shape}')
     print(f'validation features shape: {validation_data[0].shape}, labels shape: {validation_data[1].shape}')
