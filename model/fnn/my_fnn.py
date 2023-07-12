@@ -1,8 +1,10 @@
 # coding=utf-8
+from collections import defaultdict
 import json
 import random
 
 import numpy as np
+import pandas as pd
 
 from utils.functional import Functional
 from utils.cost import CrossEntropyCost
@@ -81,6 +83,7 @@ class FNN:
         iter_counts = 1
 
         # 开始训练 循环每一个epochs
+        history = defaultdict(list)
         for j in range(epochs):
             # 洗牌 打乱训练数据
             random.shuffle(random_index)
@@ -99,16 +102,21 @@ class FNN:
 
             cost = self.total_cost(training_data, convert=True)
             print(f'Cost on training data: {cost}')
+            history['loss'].append(cost)
             if self.output_dims > 1:
                 accuracy = self.accuracy(training_data)
-                print(f'Accuracy on training data: {accuracy}')
+                print(f'Accuracy on training data: {accuracy:.2%}')
+                history['accuracy'].append(accuracy)
 
             if validation_data is not None:
                 cost = self.total_cost(validation_data, convert=True)
                 print(f'Cost on validation data: {cost}')
+                history['val_loss'].append(cost)
                 if self.output_dims > 1:
                     accuracy = self.accuracy(validation_data)
-                    print(f'Accuracy on validation data: {accuracy}')
+                    print(f'Accuracy on validation data: {accuracy:.2%}')
+                    history['val_accuracy'].append(accuracy)
+        return pd.DataFrame.from_dict(history)
 
     def predict(self, X, y=None):
         output_y = self.feedforward(X)
@@ -117,7 +125,7 @@ class FNN:
             print(f'Cost on test data: {cost}')
             if self.output_dims > 1:
                 accuracy = self.accuracy((X, y), predict=output_y)
-                print(f'Accuracy on test data: {accuracy}')
+                print(f'Accuracy on test data: {accuracy:.2%}')
         if self.output_dims > 1:
             output_y = np.argmax(output_y, axis=1)
         return output_y
@@ -219,7 +227,7 @@ class FNN:
         if encoding:
             y = np.argmax(y, axis=1)
         res = np.sum(a == y, dtype=int) / len(y)
-        return f'{res:.2%}'
+        return res
 
     def total_cost(self, data, predict=None, convert=False):
         """
