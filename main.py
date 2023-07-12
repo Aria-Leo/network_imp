@@ -10,14 +10,20 @@ import torch.utils.data as data_utils
 from pytorch_cnn import PytorchCNN
 from tensorflow_cnn import TensorflowCNN
 from cnn import CNN, Conv2d, Dense, Flatten
-# from fnn import FNN
-# from utils.cost import CrossEntropyCost
+from fnn import FNN
 from data_loader import CSVDataLoader
 
 matplotlib.use('TkAgg')
 sns.set_style('darkgrid')
 plt.rcParams['font.sans-serif'] = ['SimHei']
 plt.rcParams['axes.unicode_minus'] = False
+
+
+def my_dnn_test():
+    net = FNN([784, 60, 10], activation='leaky_relu')
+    net.fit(training_data, epochs=10, mini_batch_size=50,
+            eta=0.001, lambda_=0.01, validation_data=validation_data)
+    net.predict(test_data[0], y=test_data[1])
 
 
 def my_cnn_test():
@@ -88,17 +94,16 @@ def tensorflow_cnn_test():
 
 
 if __name__ == '__main__':
+    # 使用DNN网络时，需要把CSVDataLoader.load方法的visualization参数设置为False，即保持向量的形式。
+    # 使用CNN时，该参数需要设置为True，将输入数据reshape为(n,c,h,w)的图片格式
     training_data, validation_data, test_data = CSVDataLoader.load(r'data/fashion_mnist.zip',
-                                                                   visualization=True, training_samples=2000,
+                                                                   visualization=False, training_samples=2000,
                                                                    train_valid_split=0.8, test_samples=500)
     print(f'training features shape: {training_data[0].shape}, labels shape: {training_data[1].shape}')
     print(f'validation features shape: {validation_data[0].shape}, labels shape: {validation_data[1].shape}')
     print(f'test features shape: {test_data[0].shape}, labels shape: {test_data[1].shape}')
     # training_data, validation_data, test_data = PKLDataLoader.load(r'data/mnist.pkl.gz')
-    # net = FNN([784, 60, 10], activation='leaky_relu', cost=CrossEntropyCost('softmax'))
-    # net.fit(training_data, epochs=10, mini_batch_size=50,
-    #         eta=0.001, lambda_=0.01, validation_data=validation_data)
-    # net.predict(test_data[0], y=test_data[1])
+    # my_dnn_test()
     my_cnn_history = my_cnn_test()
     pytorch_cnn_history = pytorch_cnn_test()
     tensorflow_cnn_history = tensorflow_cnn_test()

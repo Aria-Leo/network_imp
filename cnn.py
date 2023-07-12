@@ -137,7 +137,7 @@ class Flatten(Layer):
         return self.forward(*args, **kwargs)
 
 
-class Adam:
+class AdamW:
 
     def __init__(self, eta=0.001, beta1=0.9, beta2=0.999):
         self.eta = eta
@@ -179,7 +179,7 @@ class Adam:
 
 class CNN:
 
-    def __init__(self, sequential: list, cost=CrossEntropyCost(), optimizer=Adam()):
+    def __init__(self, sequential: list, cost=CrossEntropyCost(), optimizer=AdamW()):
         """
 
         Args:

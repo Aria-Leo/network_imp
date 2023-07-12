@@ -91,8 +91,8 @@ class FNN:
             for k in range(0, n, mini_batch_size):
                 mini_batch = (train_features[k: k + mini_batch_size],
                               train_labels[k: k + mini_batch_size])
-                self.adam(mini_batch, iter_counts, eta=eta,
-                          beta1=beta1, beta2=beta2, lambda_=lambda_)
+                self.adamW(mini_batch, iter_counts, eta=eta,
+                           beta1=beta1, beta2=beta2, lambda_=lambda_)
                 iter_counts += 1
 
             print(f'Epoch {j} training complete')
@@ -122,8 +122,8 @@ class FNN:
             output_y = np.argmax(output_y, axis=1)
         return output_y
 
-    def adam(self, mini_batch, iter_counts, eta=0.001,
-             beta1=0.9, beta2=0.999, lambda_=0.0):
+    def adamW(self, mini_batch, iter_counts, eta=0.001,
+              beta1=0.9, beta2=0.999, lambda_=0.0):
         # 训练每一个mini_batch
         batch_x, batch_y = mini_batch
         nabla_b, nabla_w = self.get_gradient(batch_x, batch_y)
