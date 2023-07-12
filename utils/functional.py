@@ -237,7 +237,7 @@ class Functional:
     @staticmethod
     def convnd(input_, kernel, stride=1, padding='same',
                     conv_mode='normal', dilated_feature=0, dilated_kernel=0,
-                    output_shrink=0, output_padding=0):
+                    output_shape=None, output_shrinking=0):
         """
         定义一下计算规则：
         1.input_->(..., h_in, w_in), kernel->(..., kernel_size, kernel_size):
@@ -264,9 +264,8 @@ class Functional:
                                      0 0 0 0 0
                                      7 0 8 0 9]
             dilated_kernel: 对kernel相邻元素添加空洞，含义与dilated_feature类似
-            output_shrink: int or (tuple, list, np.ndarray), 表示删除输出结果外围的行和列，
-                效果与使用np.pad相反，生效顺序在output_padding之前
-            output_padding: int or (tuple, list, np.ndarray), 对输出结果进行padding
+            output_shape: None or tuple|list, 限定输出最后2维的shape，按照"缺补多删"的原则，在右下两侧padding或shrinking 0
+            output_shrinking: 取值形式与padding相同，删除输出feature的"外围"部分
 
         Returns:
 
@@ -309,35 +308,37 @@ class Functional:
         input_ = np.pad(input_, pad_width=use_padding_size)
         out_shape_h = (input_.shape[-2] - kernel_size) // stride + 1
         out_shape_w = (input_.shape[-1] - kernel_size) // stride + 1
-        row_start, row_end = 0, out_shape_h
-        col_start, col_end = 0, out_shape_w
-        if isinstance(output_shrink, int):
-            row_start += output_shrink
-            col_start += output_shrink
-            row_end -= output_shrink
-            col_end -= output_shrink
-        elif isinstance(output_shrink, (tuple, list, np.ndarray)):
-            row_start += output_shrink[0]
-            col_start += output_shrink[0]
-            row_end -= output_shrink[1]
-            col_end -= output_shrink[1]
-        result = np.zeros((*input_.shape[:-2], row_end - row_start, col_end - col_start))
-        for i in range(row_start, row_end):
-            for j in range(col_start, col_end):
+        result = np.zeros((*input_.shape[:-2], out_shape_h, out_shape_w))
+        for i in range(out_shape_h):
+            for j in range(out_shape_w):
                 input_patch = input_[..., i * stride: i * stride + kernel_size,
                                           j * stride: j * stride + kernel_size]
                 temp_res = np.sum(input_patch * kernel, axis=(-2, -1))
-                result[..., i - row_start, j - col_start] = temp_res
+                result[..., i, j] = temp_res
 
-        if isinstance(output_padding, (tuple, list, np.ndarray)) or output_padding > 0:
-            use_padding_size = [(0, 0) for _ in range(len(result.shape))]
-            if isinstance(output_padding, int):
-                use_padding_size[-2] = use_padding_size[-1] = (output_padding, output_padding)
-            elif isinstance(output_padding, (tuple, list, np.ndarray)):
-                use_padding_size[-2] = use_padding_size[-1] = (
-                    output_padding[0], output_padding[1])
-            result = np.pad(result, use_padding_size)
+        # 右下侧"缺补多删原则"，确保shape满足期望
+        if isinstance(output_shrinking, int):
+            output_shrinking = (output_shrinking, output_shrinking)
+        if output_shape is not None:
+            use_output_shape = (output_shape[-2] + 2 * output_shrinking[-2],
+                                output_shape[-1] + 2 * output_shrinking[-1])
+            if tuple(use_output_shape) != (out_shape_h, out_shape_w):
+                if use_output_shape[-2] > out_shape_h:
+                    use_padding_size = [(0, 0) for _ in range(len(result.shape))]
+                    use_padding_size[-2] = (0, use_output_shape[-2] - out_shape_h)
+                    result = np.pad(result, use_padding_size)
+                elif use_output_shape[-2] < out_shape_h:
+                    result = result[..., :use_output_shape[-2], :]
+                if use_output_shape[-1] > out_shape_w:
+                    use_padding_size = [(0, 0) for _ in range(len(result.shape))]
+                    use_padding_size[-1] = (0, use_output_shape[-1] - out_shape_w)
+                    result = np.pad(result, use_padding_size)
+                elif use_output_shape[-1] < out_shape_w:
+                    result = result[..., :use_output_shape[-1]]
 
+        # 删除"外圈"的padding
+        result = result[..., output_shrinking[-2]: result.shape[-2] - output_shrinking[-2],
+                             output_shrinking[-1]: result.shape[-1] - output_shrinking[-1]]
         return result
 
     @staticmethod

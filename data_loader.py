@@ -34,7 +34,8 @@ class PKLDataLoader:
 class CSVDataLoader:
 
     @staticmethod
-    def load(zip_file_path, visualization=False, aspect_ratio=1, channels=1, samples=100):
+    def load(zip_file_path, visualization=False, aspect_ratio=1, channels=1,
+             train_valid_split=0.8, training_samples=None, test_samples=None):
         # train validation test
         processed_data = [None, None, None]
         with zipfile.ZipFile(zip_file_path, mode='r') as zip_filer:
@@ -44,11 +45,19 @@ class CSVDataLoader:
                 with zip_filer.open(file_name, mode='r') as filer:
                     data = pd.read_csv(filer)
                     if 'train' in file_name:
-                        random_idx = np.random.permutation(data.shape[0])
-                        if isinstance(samples, int) and samples < data.shape[0]:
-                            data = data.iloc[random_idx[:samples]]
-                        elif isinstance(samples, float) and samples < 1:
-                            data = data.iloc[random_idx[:int(data.shape[0] * samples)]]
+                        if isinstance(training_samples, int) and training_samples < data.shape[0]:
+                            random_idx = np.random.permutation(data.shape[0])
+                            data = data.iloc[random_idx[:training_samples]]
+                        elif isinstance(training_samples, float) and training_samples < 1:
+                            random_idx = np.random.permutation(data.shape[0])
+                            data = data.iloc[random_idx[:int(data.shape[0] * training_samples)]]
+                    elif 'test' in file_name:
+                        if isinstance(test_samples, int) and test_samples < data.shape[0]:
+                            random_idx = np.random.permutation(data.shape[0])
+                            data = data.iloc[random_idx[:test_samples]]
+                        elif isinstance(test_samples, float) and test_samples < 1:
+                            random_idx = np.random.permutation(data.shape[0])
+                            data = data.iloc[random_idx[:int(data.shape[0] * test_samples)]]
                     features, labels = data.drop('label', axis=1).values, data['label'].values
                     if len(features.shape) == 2 and visualization:
                         area = features.shape[1]
@@ -65,7 +74,7 @@ class CSVDataLoader:
                     if 'train' in file_name:
                         # 训练集|验证集划分
                         idx = np.random.permutation(len(labels))
-                        split_pos = int(len(labels) * 0.8)
+                        split_pos = int(len(labels) * train_valid_split)
                         train_data = (features[idx[:split_pos]], labels[idx[:split_pos]])
                         validation_data = (features[idx[split_pos:]], labels[idx[split_pos:]])
                         processed_data[0], processed_data[1] = train_data, validation_data

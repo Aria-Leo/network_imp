@@ -1,8 +1,10 @@
-import random
-import time
 from abc import ABCMeta, abstractmethod
-import numpy as np
 from collections import deque, defaultdict
+import random
+from tqdm import tqdm
+
+import numpy as np
+import pandas as pd
 
 from utils.functional import Functional
 from utils.cost import CrossEntropyCost
@@ -17,7 +19,7 @@ class Layer(metaclass=ABCMeta):
 
 class Dense(Layer):
 
-    def __init__(self, in_features, out_features, activation='softmax', lambda_=0.001):
+    def __init__(self, in_features, out_features, activation='softmax', lambda_=0.01):
         self.in_features = in_features
         self.out_features = out_features
         self.lambda_ = lambda_
@@ -47,14 +49,14 @@ class Dense(Layer):
             output: np.array, shape: (n, out_features)
 
         """
-        print('Flow into dense layer...')
-        print(f'Input shape: {inputs.shape}')
+        # print('Flow into dense layer...')
+        # print(f'Input shape: {inputs.shape}')
         output = inputs @ self.weights.T + self.biases
         self.output_linear__ = output
         if self.activation is not None:
             self.output_activation_prime__ = self.activation_prime(output)
             output = self.activation(output)
-        print(f'Output shape: {output.shape}')
+        # print(f'Output shape: {output.shape}')
         return output
 
 
@@ -94,8 +96,8 @@ class Conv2d(Layer):
             output: np.array, shape: (n, c_out, h_out, w_out)
 
         """
-        print('Flow into conv2d layer...')
-        print(f'Input shape: {inputs.shape}')
+        # print('Flow into conv2d layer...')
+        # print(f'Input shape: {inputs.shape}')
         if len(inputs.shape) == 3:
             inputs = np.expand_dims(inputs, axis=0)
 
@@ -107,7 +109,7 @@ class Conv2d(Layer):
         if self.activation is not None:
             self.output_activation_prime__ = self.activation_prime(output)
             output = self.activation(output)
-        print(f'Output shape: {output.shape}')
+        # print(f'Output shape: {output.shape}')
 
         return output
 
@@ -119,8 +121,8 @@ class Flatten(Layer):
         self.end_dim = end_dim
 
     def forward(self, inputs):
-        print('Flow into flatten layer...')
-        print(f'Input shape: {inputs.shape}')
+        # print('Flow into flatten layer...')
+        # print(f'Input shape: {inputs.shape}')
         shape_size = len(inputs.shape)
         if self.end_dim < 0:
             end_dim = shape_size + 1 - self.end_dim
@@ -128,7 +130,7 @@ class Flatten(Layer):
             end_dim = self.end_dim + 1
         assert self.start_dim < end_dim, 'invalid dim input!'
         output = inputs.reshape(*inputs.shape[:self.start_dim], -1, *inputs.shape[end_dim:])
-        print(f'Output shape: {output.shape}')
+        # print(f'Output shape: {output.shape}')
         return output
 
     def __call__(self, *args, **kwargs):
@@ -169,7 +171,7 @@ class Adam:
         fm_rect = current_info['fm'] / (1 - self.beta1 ** current_info['iter_counts'])
         sm_rect = current_info['sm'] / (1 - self.beta2 ** current_info['iter_counts'])
 
-        # 更新参数
+        # 更新参数(adamW算法)
         new_parameter = ((1 - self.eta * lambda_) * parameter
                          - self.eta * fm_rect / (np.sqrt(sm_rect) + 1e-7))
         return new_parameter
@@ -247,7 +249,7 @@ class CNN:
         self.gradients['weights'].appendleft(dw)
         # 获取loss对最后一层输入的导数, shape: (n, features)
         dz = (delta @ self.sequential[-1].weights) * self.outputs_activation_prime__[-2]
-        print(f'{self.num_layers}-output layer db, dw, dz calculated')
+        # print(f'{self.num_layers}-output layer db, dw, dz calculated')
         for layer in range(2, self.num_layers):
             layer_obj = self.sequential[-layer]
             layer_type = layer_obj.__class__.__name__
@@ -271,48 +273,32 @@ class CNN:
                     padding = kernel_size // 2
                 # shape: (c_in, N, h_in, w_in)
                 iter_layer_input = layer_input.transpose(1, 0, 2, 3)
-                layer_weights = layer_obj.weights  # shape: (c_out, c_in, kernel_size, kernel_size)
-                stride = layer_obj.stride
-                feature_size = layer_input.shape[-1]
-                output_shrink = 1 if feature_size % 2 == 0 and stride > 1 else 0
                 # shape: (c_out, c_in, N, h_out, w_out)
                 iter_dz = dz.transpose(1, 0, 2, 3)
                 iter_dz = np.expand_dims(iter_dz, axis=1).repeat(
                     iter_layer_input.shape[0], axis=1)
+
                 dw = Functional.convnd(iter_layer_input, iter_dz, padding=padding,
-                                              dilated_kernel=stride - 1,
-                                              output_shrink=(0, output_shrink))
+                                       dilated_kernel=layer_obj.stride-1,
+                                       output_shape=(kernel_size, kernel_size))
                 dw = np.sum(dw, axis=2) / len(labels)
                 self.gradients['biases'].appendleft(db)
                 self.gradients['weights'].appendleft(dw)
 
                 # 计算当前层的dz
                 # shape: (c_in, c_out, kernel_size, kernel_size)
+                layer_weights = layer_obj.weights  # shape: (c_out, c_in, kernel_size, kernel_size)
                 iter_layer_weights = layer_weights.transpose(1, 0, 2, 3)
-                layer_input_size = layer_input.shape[-1]
-                input_padding = padding
-                output_shrink = output_padding = 0
-                if stride == 1:
-                    output_shrink = input_padding
-                else:
-                    if input_padding == 0:
-                        if layer_input_size % 2 == 0:
-                            output_padding = (0, 1)
-                    else:
-                        if layer_input_size % 2 != 0:
-                            output_shrink = input_padding
-                        else:
-                            output_shrink = (input_padding, input_padding - 1)
-
                 # shape: (N, c_in, c_out, h_out, w_out)
                 iter_dz = np.expand_dims(dz, axis=1).repeat(
                     iter_layer_weights.shape[0], axis=1)
+
                 dz = Functional.convnd(iter_dz, iter_layer_weights,
-                                              padding=kernel_size-1, dilated_feature=stride-1,
-                                              conv_mode='math', output_shrink=output_shrink,
-                                              output_padding=output_padding)
+                                       padding=kernel_size-1, dilated_feature=layer_obj.stride-1,
+                                       conv_mode='math', output_shape=layer_input.shape[-2:],
+                                       output_shrinking=padding)
                 dz = np.sum(dz, axis=2) * self.outputs_activation_prime__[-layer-1]
-            print(f'{self.num_layers - layer + 1}-{layer_type} layer db, dw, dz calculated')
+            # print(f'{self.num_layers - layer + 1}-{layer_type} layer db, dw, dz calculated')
 
     def fit(self, features, labels, epochs=10, batch_size=10, validation_data=None):
         # 初始化梯度相关指标的记录
@@ -325,6 +311,7 @@ class CNN:
             labels = np.eye(self.output_dims)[labels]
         else:
             labels = labels.reshape(-1, 1)
+        history = defaultdict(list)
         for j in range(epochs):
             # 洗牌 打乱训练数据
             random.shuffle(random_index)
@@ -335,15 +322,15 @@ class CNN:
             total_cost = 0
             accuracy = 0
             counts = 0
-            for k in range(0, n, batch_size):
+            process_bar = tqdm(range(0, n, batch_size))
+            for k in process_bar:
                 # 初始化缓存
-                time_batch_start = time.time()
                 self.init_cache()
                 batch_features = features[k: k + batch_size]
                 batch_labels = labels[k: k + batch_size]
                 # 前向传播
                 batch_output = self.forward(batch_features, record=True)
-                print('forward complete!')
+                # print('forward complete!')
                 # 反向梯度推导
                 self.backward(batch_labels)
                 # 根据梯度更新参数
@@ -359,6 +346,8 @@ class CNN:
                     layer_bias_name = f'{layer}_bias'
                     self.sequential[layer-1].weights = self.optimizer.update(
                         layer_weight_name, weight, weight_gradient, lambda_)
+
+                    # bias不做正则
                     self.sequential[layer-1].biases = self.optimizer.update(
                         layer_bias_name, bias, bias_gradient, lambda_)
                     layer += 1
@@ -368,17 +357,18 @@ class CNN:
                     true_res = np.argmax(batch_labels, axis=1)
                     predict_res = np.argmax(batch_output, axis=1)
                     accuracy += np.sum(true_res == predict_res, dtype=int)
-                time_batch_end = time.time()
                 counts += 1
-                print(f'{j} epochs train {counts} batch time cost: '
-                      f'{(time_batch_end - time_batch_start) / 60:.2f}min')
+                process_bar.set_description(f'{j} epochs, batch {counts}/{int(np.ceil(n / batch_size))}, '
+                                            f'samples {k + batch_size}/{n}')
 
             # 计算总平均损失
             total_cost /= n
-            print(f'epoch {j} total cost on training data: {total_cost}')
+            history['loss'].append(total_cost)
+            print(f'epoch {j} average cost on training data: {total_cost}')
             if self.output_dims > 1:
                 # 计算准确率
                 accuracy /= n
+                history['accuracy'].append(accuracy)
                 print(f'epoch {j} accuracy on training data: {accuracy:.2%}')
 
             if validation_data is not None:
@@ -389,14 +379,17 @@ class CNN:
                     encoding_labels = valid_labels.reshape(-1, 1)
                 valid_output = self.forward(valid_features)
                 total_cost = self.cost.fn(valid_output, encoding_labels) / len(valid_labels)
-                print(f'epoch {j} total cost on validation data: {total_cost}')
+                history['val_loss'].append(total_cost)
+                print(f'epoch {j} average cost on validation data: {total_cost}')
                 if self.output_dims > 1:
                     predict_res = np.argmax(valid_output, axis=1)
                     accuracy = np.sum(valid_labels == predict_res, dtype=int) / len(valid_labels)
+                    history['val_accuracy'].append(accuracy)
                     print(f'epoch {j} accuracy on validation data: {accuracy:.2%}')
 
         # 清空缓存变量
         self.init_cache()
+        return pd.DataFrame.from_dict(history)
 
     def predict(self, X, y=None):
         output = self.forward(X)
@@ -406,7 +399,7 @@ class CNN:
             else:
                 encoding_y = y.reshape(-1, 1)
             total_cost = self.cost.fn(output, encoding_y) / len(y)
-            print(f'total cost on test data: {total_cost}')
+            print(f'average cost on test data: {total_cost}')
             if self.output_dims > 1:
                 output = np.argmax(output, axis=1)
                 accuracy = np.sum(output == y, dtype=int) / len(y)
