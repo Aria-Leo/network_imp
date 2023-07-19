@@ -258,7 +258,7 @@ class CNN:
                 dw = (dz.T @ self.outputs_[-layer-1]) / len(labels)
                 self.gradients['biases'].appendleft(db)
                 self.gradients['weights'].appendleft(dw)
-                dz = (dz @ self.sequential[-layer]) * self.outputs_activation_prime__[-layer-1]
+                dz = (dz @ self.sequential[-layer].weights) * self.outputs_activation_prime__[-layer-1]
             elif layer_type == 'Flatten':
                 self.gradients['biases'].appendleft(None)
                 self.gradients['weights'].appendleft(None)
