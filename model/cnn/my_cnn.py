@@ -349,7 +349,7 @@ class CNN:
 
                     # bias不做正则
                     self.sequential[layer-1].biases = self.optimizer.update(
-                        layer_bias_name, bias, bias_gradient, lambda_)
+                        layer_bias_name, bias, bias_gradient)
                     layer += 1
 
                 total_cost += self.cost.fn(batch_output, batch_labels)
