@@ -1,4 +1,4 @@
-# network implemented by myself  
+# Network implemented by myself  
 main.py->入口  
 model.fnn.my_fnn.py->纯numpy从0实现前馈神经网络前向传播-反向更新代码，并实现了交叉熵+softmax，adamW正则化  
 
